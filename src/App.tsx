@@ -35,7 +35,9 @@ export default function App() {
   const [coriolisEnabled, setCoriolisEnabled] = useState(true);
 
   const [mode, setMode] = useState<PumpMode>("combined");
-  const [outletPressure, setOutletPressure] = useState<number>(500);
+  const [outletPressure, setOutletPressure] = useState<number>(100);
+  /** Backing-pump throughput capacity [Pa·L/s] for S(P_in) envelope. */
+  const [qMaxPaLps, setQMaxPaLps] = useState<number>(1000);
   const [turboMethod, setTurboMethod] = useState<TurboMethod>("kruger");
   const [holweckMethod, setHolweckMethod] = useState<HolweckMethod>("sickafus");
   const [turboStages, setTurboStages] = useState<Stage[]>([
@@ -110,6 +112,9 @@ export default function App() {
     setCoriolisEnabled(p.coriolisEnabled);
     if (p.expected.outletPressure !== undefined) {
       setOutletPressure(p.expected.outletPressure);
+    }
+    if (p.expected.qMaxPaLps !== undefined) {
+      setQMaxPaLps(p.expected.qMaxPaLps);
     }
     setPresetId(p.id);
   }
@@ -189,6 +194,15 @@ export default function App() {
             unit="Па"
             onChange={setOutletPressure}
             help="Задаёт форму кривой S(P_вх): падение у P_вх ≈ P_вых/K"
+          />
+          <NumberInput
+            label="Производит. форвакуумника Q_max"
+            value={qMaxPaLps}
+            step={100}
+            min={0}
+            unit="Па·л/с"
+            onChange={setQMaxPaLps}
+            help="Пропускная способность форвакуумной линии. Ограничивает S(P_вх) сверху: S ≤ Q_max/P_вх. Типичное значение 100–2000 Па·л/с."
           />
           <label className="num-input">
             <span className="num-label">Газ</span>
@@ -307,6 +321,7 @@ export default function App() {
             result={result}
             inputs={pumpInputs}
             outletPressure={outletPressure}
+            qMaxPaLps={qMaxPaLps}
             activePreset={activePreset}
           />
         )}

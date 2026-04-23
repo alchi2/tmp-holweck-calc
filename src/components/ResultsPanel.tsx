@@ -8,17 +8,21 @@ export function ResultsPanel({
   result,
   inputs,
   outletPressure,
+  qMaxPaLps,
   activePreset,
 }: {
   result: PumpResult;
   inputs: PumpInputs;
   outletPressure: number;
+  qMaxPaLps: number;
   activePreset: Preset | null;
 }) {
   const { turbo, holweck } = result;
 
   const showPlot = result.mode === "holweck" || result.mode === "combined";
-  const calcCurve = showPlot ? calcSCurve(result, outletPressure, inputs) : [];
+  const calcCurve = showPlot
+    ? calcSCurve(result, outletPressure, inputs, qMaxPaLps)
+    : [];
   const series: Series[] = [];
   if (calcCurve.length > 0) {
     series.push({
@@ -86,13 +90,16 @@ export function ResultsPanel({
             Кривая быстроты действия S(P_вх) при P_вых = {fmt(outletPressure, 2)} Па
           </h3>
           <p className="muted small">
-            S(P_вх) = S_max · stall(P_вх, P_вых, K) · viscous(P_вх).
-            Спад слева — компрессионный предел P_вх &lt; P_вых/K (пумпа не может
-            удержать компрессию). Спад справа — переход в вязкий режим при
-            Kn ≈ 1 (средний свободный пробег ≈ минимальный канал пумпы, см.
-            раздел 6c «Справки»). Меняйте P_вых в общих параметрах — левая
-            граница сдвигается; меняя геометрию (axial gap / groove depth) —
-            сдвигается правая.
+            Модель Sawada 1979 / Skovorodko 2002 (переходный Couette–
+            Poiseuille-режим в drag-канале):
+            <code>S(P_вх) = min(S_max·f_vi·stall, Q_max/P_вх)</code>.
+            Слева — компрессионный предел P_вх &lt; P_вых/K_эф.
+            В середине — молекулярное плато.
+            Справа — верхняя огибающая по пропускной способности
+            форвакуумной линии (Q = S·P_вх &lt; Q_max), задаётся в общих
+            параметрах. Плюс Sawada-спад K(P):
+            <code>ln K = ln K_fm · Kn/(Kn+1)</code>, Kn = λ·P<sub>ref</sub>/(h·P).
+            Подробнее см. раздел 6c «Справки».
           </p>
           {series.length > 0 ? (
             <SCurvePlot series={series} />

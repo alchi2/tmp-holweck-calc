@@ -133,90 +133,145 @@ export function calculatePump(inp: PumpInputs): PumpResult {
 /**
  * S(P_in) curve at fixed P_out (forevacuum pressure).
  *
- * Physical model combining three regimes (free-molecular → transitional →
- * viscous) to reproduce the characteristic shape of TMP / Holweck datasheets:
+ * Physical model (Sawada 1979 / Skovorodko 2002 transitional Couette-
+ * Poiseuille balance for the Holweck channel, composited with the turbo
+ * compression assumed pressure-independent):
  *
- *   S(P_in) = S_max · stall(P_in) · viscous(P_in)
+ *   S(P_in) = S_max · max(0, 1 − P_out/(K_eff(P_avg) · P_in))
  *
- *   stall(P_in)  = max(0, 1 − P_out/(K · P_in))
- *     Compression limit: below P_out/K the pump cannot hold that inlet
- *     pressure against the foreline. Usually invisible on datasheet curves
- *     because P_out/K ≪ operating range.
+ * where the effective compression accounts for the progressive collapse of
+ * K from its free-molecular value toward 1 as pressure rises:
  *
- *   viscous(P_in) = 1 / (1 + (P_in / P_knee)^3)
- *     Transitional/viscous rolloff: pumping speed collapses when the mean
- *     free path λ becomes comparable to the smallest relevant dimension
- *     (blade gap or groove depth). We take the knee at Kn ≈ 1:
- *        P_knee = (λ_ref · P_ref) / L_char    [λ·P constant in air @ 293 K
- *                                             is 6.6·10⁻³ m·Pa].
- *     L_char = min over all section gaps (tip clearance, axial gap,
- *     Holweck groove depth, radial clearance).
+ *   K_holweck_eff(P) = 1 + (K_holweck_fm − 1) · f(Kn),
+ *                       Kn = (λ·P)_air / (h_channel · P),  f = Kn/(Kn+1)
  *
- * This matches published curves: TwisTorr 74 FS (h ≈ 0.5 mm, P_knee ≈ 13 Pa,
- * drop starts 1–10 Pa), HiPace 300 (h ≈ 0.5 mm, similar), Giors 2006 Holweck
- * (h = 0.3 mm, P_knee ≈ 22 Pa, drop starts ~5 Pa).
+ *   K_eff = K_turbo · K_holweck_eff(P_avg)
+ *   P_avg = √(P_in · P_out)   (geometric mean inside the drag channel)
+ *
+ * At low P_in (high Kn everywhere), K_eff = K_fm and we get the usual
+ * compression-limited rolloff at P_in = P_out/K_fm (far below visible range
+ * for typical pumps). At high P_in, K_holweck_eff drops toward 1 and the
+ * stall factor goes to zero as P_in → P_out — reproducing the characteristic
+ * high-pressure dropoff observed in real datasheets.
+ *
+ * For pure turbo pumps (no Holweck) we fall back to a geometric Kn-based
+ * rolloff using the smallest axial gap: a turbo's compression also drops in
+ * the transitional regime, but the exact model (Sawada 1979, Sun 2024) is
+ * stage-dependent and we approximate it by the same transition function
+ * applied to K_turbo with h_channel = min(axial_gap).
  */
 export interface SCurvePoint {
   pIn: number;
   S: number;
+  /** Effective compression K at this P_in (for secondary plot). */
+  K: number;
 }
 
-/** λ·P for air at 293 K, m·Pa. */
+/** λ·P for air at 293 K, m·Pa. Used as a gas-agnostic default. */
 const LAMBDA_P_AIR = 6.6e-3;
 
-/**
- * Characteristic length for the viscous rolloff — taken as the smallest
- * BULK FLOW channel (axial gap for turbo, groove depth for Holweck). Sealing
- * gaps (tip clearance, radial clearance) are *not* used: they throttle back-
- * flow but don't define where Kn → 1 in the main transport path.
- */
-function characteristicGap(inp: PumpInputs): number {
+function smallestTurboGap(inp: PumpInputs): number {
   const gaps: number[] = [];
-  if (inp.mode !== "holweck") {
-    for (const s of inp.turboStages) {
-      if (s.axialGap > 0) gaps.push(s.axialGap);
-    }
+  for (const s of inp.turboStages) {
+    if (s.axialGap > 0) gaps.push(s.axialGap);
   }
-  if (inp.mode !== "turbo") {
-    for (const s of inp.holweckStages) {
-      if (s.grooveDepth > 0) gaps.push(s.grooveDepth);
-    }
-  }
-  if (gaps.length === 0) return 1e-3; // fallback 1 mm
-  return Math.min(...gaps);
+  return gaps.length === 0 ? 1e-3 : Math.min(...gaps);
 }
 
+function smallestHolweckGap(result: PumpResult): number {
+  const hs = result.holweck?.stages ?? [];
+  const gaps = hs
+    .map((s) => s.hChannel)
+    .filter((g): g is number => typeof g === "number" && g > 0);
+  return gaps.length === 0 ? 1e-3 : Math.min(...gaps);
+}
+
+/**
+ * Sawada 1979 transitional correction to the zero-throughput compression
+ * ratio. Derivation (Couette–Poiseuille 1D balance):
+ *     ln K(P) = ln K_fm · f(Kn)          f(Kn) = Kn / (Kn + α)
+ * with α = 3/π ≈ 0.95 from matching Poiseuille back-flow to Knudsen
+ * diffusion at Kn = 1. We use α = 1 for simplicity (<5% effect).
+ *
+ * At high Kn (molecular): K → K_fm.
+ * At low  Kn (viscous):   K → K_fm^(π·Kn/3) → 1  (exponential collapse).
+ */
+function kAtPressure(kFm: number, h: number, P: number): number {
+  if (!(kFm > 1) || !(h > 0) || !(P > 0)) return Math.max(1, kFm);
+  const Kn = LAMBDA_P_AIR / (h * P);
+  const f = Kn / (Kn + 1);
+  return Math.pow(kFm, f);
+}
+
+/**
+ * Sawada-style pumping speed correction: in the viscous regime the
+ * kinetic-flux inlet conductance (v_m·A/4) drops because molecules collide
+ * in the bulk and only a small Couette-drag component contributes. We
+ * linearly blend between molecular and viscous plateaus with the same
+ * f(Kn) transition function:
+ *   S_eff(P) = S_max · (r_vi + (1 − r_vi)·f(Kn))
+ * where r_vi ≈ 0.02 is the residual viscous-drag fraction (typical Holweck
+ * drag in continuum is ~1–5% of the molecular inlet conductance).
+ */
+function sFractionAtPressure(h: number, P: number): number {
+  const R_VISCOUS = 0.02;
+  if (!(h > 0) || !(P > 0)) return 1;
+  const Kn = LAMBDA_P_AIR / (h * P);
+  const f = Kn / (Kn + 1);
+  return R_VISCOUS + (1 - R_VISCOUS) * f;
+}
+
+/**
+ * Build the S(P_in) curve. Additional parameters:
+ *   qMaxPaLps  — maximum throughput the backing pump can handle [Pa·L/s].
+ *               Datasheet curves are measured at a fixed foreline setup, so
+ *               beyond Q = S·P_in > Q_max the foreline pressure rises, the
+ *               pump stalls, and the observed S drops as 1/P_in. Defaults
+ *               to 1000 Pa·L/s (≈ 10 L/s backing pump at ≤100 Pa foreline).
+ */
 export function calcSCurve(
   result: PumpResult,
   pOut: number,
   inputs: PumpInputs,
-  nPoints = 60,
+  qMaxPaLps = 1000,
+  nPoints = 80,
 ): SCurvePoint[] {
   if (!(result.sMaxLps > 0) || !(result.kTotal > 1)) return [];
-  const K = result.kTotal;
   const pOutSafe = Math.max(pOut, 1e-6);
-  const pStall = pOutSafe / K;
+  const kTurbo = result.turbo?.kTotal ?? 1;
+  const kHolweckFm = result.holweck?.kTotal ?? 1;
 
-  const Lchar = characteristicGap(inputs);
-  // Molar-mass correction for mean free path: λ ∝ 1/(σ·n) ∝ T/P (ideal gas)
-  // but weakly depends on gas via σ. Use air value; the factor-of-2 precision
-  // is enough for the shape.
-  const pKnee = LAMBDA_P_AIR / Math.max(Lchar, 1e-6);
+  const hHolweck = smallestHolweckGap(result);
+  const hTurbo = smallestTurboGap(inputs);
+  const hAny = Math.min(hHolweck, hTurbo);
 
-  // Plot range: one decade below operating low end to ~10× P_knee.
-  const pMin = Math.min(pStall * 5, 1e-7);
-  const pMax = Math.max(pKnee * 20, 10);
+  // Plot range: from the stall edge down a bit for context, up to where the
+  // throughput-limited curve (Q_max / P_in) has dropped to ~0.5% of S_max.
+  const pStall = pOutSafe / result.kTotal;
+  const pThroughputFall = qMaxPaLps / (0.005 * result.sMaxLps);
+  const pMin = Math.min(pStall * 0.3, 1e-7);
+  const pMax = Math.max(pOutSafe * 2, pThroughputFall);
   if (!(pMax > pMin)) return [];
+
   const logMin = Math.log10(pMin);
   const logMax = Math.log10(pMax);
   const step = (logMax - logMin) / (nPoints - 1);
   const pts: SCurvePoint[] = [];
   for (let i = 0; i < nPoints; i++) {
     const pIn = Math.pow(10, logMin + i * step);
+    const pAvg = Math.sqrt(pIn * pOutSafe);
+
+    const kH = kHolweckFm > 1 ? kAtPressure(kHolweckFm, hHolweck, pAvg) : 1;
+    const kT = kTurbo > 1 ? kAtPressure(kTurbo, hTurbo, pAvg) : 1;
+    const K = kT * kH;
+
+    const sFrac = sFractionAtPressure(hAny, pAvg);
     const stall = Math.max(0, 1 - pOutSafe / (K * pIn));
-    const viscous = 1 / (1 + Math.pow(pIn / pKnee, 3));
-    const S = result.sMaxLps * stall * viscous;
-    pts.push({ pIn, S: Math.max(0, S) });
+    const S_compression = result.sMaxLps * sFrac * stall;
+    // Throughput-limited envelope (backing-pump capacity).
+    const S_throughput = qMaxPaLps / Math.max(pIn, 1e-12);
+    const S = Math.min(S_compression, S_throughput);
+    pts.push({ pIn, S: Math.max(0, S), K });
   }
   return pts;
 }

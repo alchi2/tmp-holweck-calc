@@ -85,10 +85,16 @@ export interface HolweckResult {
   nSpec: number;
   /** Effective gap h_eff used in K integration [m]. */
   hEff: number;
-  /** ln K_max. */
+  /** ln K_max (free-molecular limit). */
   logKmax: number;
   /** K_max = exp(ln K). Capped at 1e20 to avoid overflow. */
   kMax: number;
+  /**
+   * Characteristic channel height for Knudsen-number computation [m].
+   * = min(h_groove, δ_radial); used by the Sawada/Skovorodko transitional
+   * model K(P) = 1 + (K_fm − 1)·f(Kn).
+   */
+  hChannel: number;
   /** Drag volumetric flow [m³/s] — the kinematic pumping speed upper bound. */
   sDrag: number;
   /** Thermal-diffusion limited inlet speed [m³/s]. */
@@ -209,6 +215,11 @@ export function calcHolweckStage(
   const aSide = Math.PI * D * L;
   const pGas = rho * u * u * aSide * 0.02;
 
+  // Smallest dimension in the main flow path (min of groove depth and radial
+  // clearance) — drives the Knudsen number for the Sawada-style transitional
+  // K(P) correction.
+  const hChannel = Math.min(h, delta);
+
   return {
     id: stage.id,
     uPeripheral: u,
@@ -220,12 +231,42 @@ export function calcHolweckStage(
     hEff,
     logKmax,
     kMax,
+    hChannel,
     sDrag,
     sTherm,
     sMax,
     sMaxLps: sMax * 1000,
     pGas,
   };
+}
+
+/**
+ * Sawada 1979 / Skovorodko 2002 transitional/viscous correction to the
+ * free-molecular compression ratio.
+ *
+ * Physical basis (Couette–Poiseuille 1D balance in the drag channel):
+ *   – free molecular (Kn ≫ 1): ln K → ln K_fm (value at P=0)
+ *   – continuum    (Kn ≪ 1):   ΔP = 6·μ·u·L/h² ⇒ K → 1 + ΔP/P, approaches 1
+ * The unified transition function is close to
+ *   K(P) = 1 + (K_fm − 1) · f(Kn),     f(Kn) = Kn/(Kn+α), α ≈ 1
+ * with Kn = λ/h, λ·P ≈ 6.6·10⁻³ m·Pa for air at 293 K.
+ *
+ * This reproduces Sawada's experimental observation that K falls by several
+ * orders of magnitude between free-molecular (P ≪ 1 Pa) and viscous
+ * (P ≫ 100 Pa) operation in typical Holweck stages.
+ */
+export function kHolweckAtPressure(
+  kFreeMolecular: number,
+  hChannel: number,
+  pressure: number,
+  lambdaP = 6.6e-3,
+): number {
+  if (!(kFreeMolecular > 1) || !(hChannel > 0) || !(pressure > 0))
+    return Math.max(1, kFreeMolecular);
+  const lambda = lambdaP / pressure;
+  const Kn = lambda / hChannel;
+  const f = Kn / (Kn + 1);
+  return 1 + (kFreeMolecular - 1) * f;
 }
 
 export function calcHolweck(inputs: HolweckInputs): HolweckCalc {

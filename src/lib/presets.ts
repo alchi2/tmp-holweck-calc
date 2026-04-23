@@ -29,6 +29,11 @@ export interface Preset {
     sMaxLps?: number;
     /** Forevacuum pressure [Pa] at which the expected K and S apply. */
     outletPressure?: number;
+    /**
+     * Backing-pump throughput capacity [Pa·L/s] used for S(P_in) envelope.
+     * Sets where the high-P rolloff starts: S ≤ Q_max/P_in.
+     */
+    qMaxPaLps?: number;
   };
   /** Digitized S(P_in) reference curve from datasheet/paper. */
   sCurve?: { pIn: number; S: number }[];
@@ -233,7 +238,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "holweckSingle",
     coriolisEnabled: false,
-    expected: { K: 1e3, sMaxLps: 15, outletPressure: 10 },
+    expected: { K: 1e3, sMaxLps: 15, outletPressure: 0.1, qMaxPaLps: 150 },
     // Типичная S(P_вх) Holweck-ступени (Jousten §7.4, Fig.7.31):
     // плоская до ~1 Па, затем вязкий спад до ~30 Па.
     sCurve: [
@@ -278,7 +283,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "holweckSingle",
     coriolisEnabled: false,
-    expected: { K: 500, sMaxLps: 5, outletPressure: 1 },
+    expected: { K: 500, sMaxLps: 5, outletPressure: 0.01, qMaxPaLps: 300 },
     // Giors 2006 Fig.6-7 — S(P_in) в молекулярном режиме плоская,
     // вязкий спад в переходной области Kn~1 (~60 Па для этой геометрии).
     sCurve: [
@@ -360,7 +365,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "combined",
     coriolisEnabled: true,
-    expected: { K: 1e9, sMaxLps: 60, outletPressure: 100 },
+    expected: { K: 1e9, sMaxLps: 60, outletPressure: 1, qMaxPaLps: 200 },
     // Agilent TwisTorr 74 FS: S плоская от 10⁻₇ до ~1 Па, вязкий спад
     // в диапазоне 5–50 Па. Foreline tolerance = 12 мбар ≈ 1200 Па.
     sCurve: [
@@ -408,7 +413,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "combined",
     coriolisEnabled: true,
-    expected: { K: 1e11, sMaxLps: 260, outletPressure: 100 },
+    expected: { K: 1e11, sMaxLps: 260, outletPressure: 1, qMaxPaLps: 700 },
     // Pfeiffer HiPace 300: S_N2 = 260 L/s, max foreline 15 мбар.
     // Datasheet graph: S плоская до ~1 Па, вязкий спад 5–50 Па.
     sCurve: [

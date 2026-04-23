@@ -51,21 +51,20 @@ export default function App() {
 
   const molarMass = gas === "custom" ? customM : GAS_LIBRARY[gas].M;
 
-  const result = useMemo(
-    () =>
-      calculatePump({
-        mode,
-        rpm,
-        temperature,
-        inletPressure,
-        outletPressure,
-        molarMass,
-        turboStages,
-        holweckStages,
-        coriolisEnabled,
-        turboMethod,
-        holweckMethod,
-      }),
+  const pumpInputs = useMemo(
+    () => ({
+      mode,
+      rpm,
+      temperature,
+      inletPressure,
+      outletPressure,
+      molarMass,
+      turboStages,
+      holweckStages,
+      coriolisEnabled,
+      turboMethod,
+      holweckMethod,
+    }),
     [
       mode,
       rpm,
@@ -80,6 +79,8 @@ export default function App() {
       holweckMethod,
     ],
   );
+
+  const result = useMemo(() => calculatePump(pumpInputs), [pumpInputs]);
 
   const activePreset: Preset | null =
     PRESETS.find((p) => p.id === presetId) ?? null;
@@ -304,6 +305,7 @@ export default function App() {
         {tab === "results" && (
           <ResultsPanel
             result={result}
+            inputs={pumpInputs}
             outletPressure={outletPressure}
             activePreset={activePreset}
           />

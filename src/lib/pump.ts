@@ -131,31 +131,81 @@ export function calculatePump(inp: PumpInputs): PumpResult {
 }
 
 /**
- * Compute the S(P_in) curve at fixed P_out (forevacuum pressure).
+ * S(P_in) curve at fixed P_out (forevacuum pressure).
  *
- * Physical model (steady state, free-molecular, single-volume throat):
- *   Q = S · P_in = S_max · (P_in − P_out / K_max)
- *   ⇒ S(P_in) = S_max · (1 − P_out / (K_max · P_in))
+ * Physical model combining three regimes (free-molecular → transitional →
+ * viscous) to reproduce the characteristic shape of TMP / Holweck datasheets:
  *
- * For P_in · K_max < P_out the pump stalls; we clamp S at 0.
+ *   S(P_in) = S_max · stall(P_in) · viscous(P_in)
  *
- * For the P_in axis we use 40 log-spaced points between
- * 1.5·P_out/K_max and ~10⁻³·P_out (the usual pump operating range).
+ *   stall(P_in)  = max(0, 1 − P_out/(K · P_in))
+ *     Compression limit: below P_out/K the pump cannot hold that inlet
+ *     pressure against the foreline. Usually invisible on datasheet curves
+ *     because P_out/K ≪ operating range.
+ *
+ *   viscous(P_in) = 1 / (1 + (P_in / P_knee)^3)
+ *     Transitional/viscous rolloff: pumping speed collapses when the mean
+ *     free path λ becomes comparable to the smallest relevant dimension
+ *     (blade gap or groove depth). We take the knee at Kn ≈ 1:
+ *        P_knee = (λ_ref · P_ref) / L_char    [λ·P constant in air @ 293 K
+ *                                             is 6.6·10⁻³ m·Pa].
+ *     L_char = min over all section gaps (tip clearance, axial gap,
+ *     Holweck groove depth, radial clearance).
+ *
+ * This matches published curves: TwisTorr 74 FS (h ≈ 0.5 mm, P_knee ≈ 13 Pa,
+ * drop starts 1–10 Pa), HiPace 300 (h ≈ 0.5 mm, similar), Giors 2006 Holweck
+ * (h = 0.3 mm, P_knee ≈ 22 Pa, drop starts ~5 Pa).
  */
 export interface SCurvePoint {
   pIn: number;
   S: number;
 }
 
+/** λ·P for air at 293 K, m·Pa. */
+const LAMBDA_P_AIR = 6.6e-3;
+
+/**
+ * Characteristic length for the viscous rolloff — taken as the smallest
+ * BULK FLOW channel (axial gap for turbo, groove depth for Holweck). Sealing
+ * gaps (tip clearance, radial clearance) are *not* used: they throttle back-
+ * flow but don't define where Kn → 1 in the main transport path.
+ */
+function characteristicGap(inp: PumpInputs): number {
+  const gaps: number[] = [];
+  if (inp.mode !== "holweck") {
+    for (const s of inp.turboStages) {
+      if (s.axialGap > 0) gaps.push(s.axialGap);
+    }
+  }
+  if (inp.mode !== "turbo") {
+    for (const s of inp.holweckStages) {
+      if (s.grooveDepth > 0) gaps.push(s.grooveDepth);
+    }
+  }
+  if (gaps.length === 0) return 1e-3; // fallback 1 mm
+  return Math.min(...gaps);
+}
+
 export function calcSCurve(
   result: PumpResult,
   pOut: number,
+  inputs: PumpInputs,
   nPoints = 60,
 ): SCurvePoint[] {
-  if (!(result.sMaxLps > 0) || !(result.kTotal > 1) || !(pOut > 0)) return [];
-  const pStall = pOut / result.kTotal;
-  const pMax = Math.max(pOut * 0.5, pStall * 1e6);
-  const pMin = pStall * 1.02;
+  if (!(result.sMaxLps > 0) || !(result.kTotal > 1)) return [];
+  const K = result.kTotal;
+  const pOutSafe = Math.max(pOut, 1e-6);
+  const pStall = pOutSafe / K;
+
+  const Lchar = characteristicGap(inputs);
+  // Molar-mass correction for mean free path: λ ∝ 1/(σ·n) ∝ T/P (ideal gas)
+  // but weakly depends on gas via σ. Use air value; the factor-of-2 precision
+  // is enough for the shape.
+  const pKnee = LAMBDA_P_AIR / Math.max(Lchar, 1e-6);
+
+  // Plot range: one decade below operating low end to ~10× P_knee.
+  const pMin = Math.min(pStall * 5, 1e-7);
+  const pMax = Math.max(pKnee * 20, 10);
   if (!(pMax > pMin)) return [];
   const logMin = Math.log10(pMin);
   const logMax = Math.log10(pMax);
@@ -163,7 +213,9 @@ export function calcSCurve(
   const pts: SCurvePoint[] = [];
   for (let i = 0; i < nPoints; i++) {
     const pIn = Math.pow(10, logMin + i * step);
-    const S = result.sMaxLps * (1 - pOut / (result.kTotal * pIn));
+    const stall = Math.max(0, 1 - pOutSafe / (K * pIn));
+    const viscous = 1 / (1 + Math.pow(pIn / pKnee, 3));
+    const S = result.sMaxLps * stall * viscous;
     pts.push({ pIn, S: Math.max(0, S) });
   }
   return pts;

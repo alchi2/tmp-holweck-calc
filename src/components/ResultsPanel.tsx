@@ -1,7 +1,8 @@
 import type { PumpInputs, PumpResult } from "../lib/pump";
-import { calcSCurve } from "../lib/pump";
+import { calcKCurve, calcSCurve } from "../lib/pump";
 import { fmt } from "../lib/format";
 import { SCurvePlot, type Series } from "./SCurvePlot";
+import { LogLogPlot, type XYSeries } from "./LogLogPlot";
 import type { Preset } from "../lib/presets";
 
 export function ResultsPanel({
@@ -111,6 +112,8 @@ export function ResultsPanel({
         </div>
       )}
 
+      {showPlot && <KPlotBlock result={result} inputs={inputs} activePreset={activePreset} />}
+
       {turbo && (result.mode === "turbo" || result.mode === "combined") && (
         <>
           <h3>Турбо-ступени</h3>
@@ -196,6 +199,62 @@ export function ResultsPanel({
         </>
       )}
     </>
+  );
+}
+
+function KPlotBlock({
+  result,
+  inputs,
+  activePreset,
+}: {
+  result: PumpResult;
+  inputs: PumpInputs;
+  activePreset: Preset | null;
+}) {
+  const expPts = activePreset?.kCurve ?? [];
+  const hasExp = expPts.length > 0;
+  const expXs = expPts.map((p) => p.pOut);
+  const pMin = hasExp ? Math.min(...expXs, 0.1) / 10 : undefined;
+  const pMax = hasExp ? Math.max(...expXs, 1e4) * 3 : undefined;
+  const kPts = calcKCurve(result, inputs, pMin, pMax);
+  if (kPts.length === 0 && !hasExp) return null;
+
+  const series: XYSeries[] = [];
+  if (kPts.length > 0) {
+    series.push({
+      label: "Расчёт K(P_вых) (Sawada-переход)",
+      color: "#4f9dff",
+      points: kPts.map((p) => ({ x: p.pOut, y: p.K })),
+    });
+  }
+  if (hasExp) {
+    series.push({
+      label: `Эксперимент — ${activePreset!.label}`,
+      color: "#f0a35c",
+      points: expPts.map((p) => ({ x: p.pOut, y: p.K })),
+      dashed: true,
+      markers: true,
+    });
+  }
+
+  return (
+    <div className="panel-subsection">
+      <h3>Компрессионная кривая K(P_вых) при нулевом расходе</h3>
+      <p className="muted small">
+        Степень сжатия при запертом входе как функция давления на выхлопе.
+        В молекулярном пределе (Kn ≫ 1) K = K_fm; с ростом P_вых число Кнудсена
+        Kn = λ·P_ref/(h·P_вых) падает, и по Sawada 1979{" "}
+        <code>ln K = ln K_fm · Kn/(Kn+1)</code>, т.е. K → 1 при P_вых &gt;&gt; P_knee.
+        Это кривая типа Fig. 4 статьи Sawada-Sugiyama 1999 и Fig. 7 статьи
+        Sharipov 2005. Точки — оцифровка эксперимента из статьи.
+      </p>
+      <LogLogPlot
+        series={series}
+        xLabel="P_вых, Па"
+        yLabel="K"
+        yFormat={(v) => (v >= 100 ? v.toExponential(0) : v.toFixed(v >= 10 ? 0 : 1))}
+      />
+    </div>
   );
 }
 

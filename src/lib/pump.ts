@@ -231,6 +231,49 @@ function sFractionAtPressure(h: number, P: number): number {
  *               pump stalls, and the observed S drops as 1/P_in. Defaults
  *               to 1000 Pa·L/s (≈ 10 L/s backing pump at ≤100 Pa foreline).
  */
+/**
+ * Zero-throughput compression curve K(P_out) — the quantity measured in
+ * Sawada 1999 Fig. 4 and Sharipov 2005 Fig. 7. At P_out < P_knee (molecular
+ * regime) K → K_fm; at high P_out the Sawada transition collapses K → 1.
+ */
+export interface KCurvePoint {
+  pOut: number;
+  K: number;
+}
+
+export function calcKCurve(
+  result: PumpResult,
+  inputs: PumpInputs,
+  pMin?: number,
+  pMax?: number,
+  nPoints = 80,
+): KCurvePoint[] {
+  if (!(result.kTotal > 1)) return [];
+  const kTurbo = result.turbo?.kTotal ?? 1;
+  const kHolweckFm = result.holweck?.kTotal ?? 1;
+
+  const hHolweck = smallestHolweckGap(result);
+  const hTurbo = smallestTurboGap(inputs);
+
+  const pLo = pMin ?? 1e-2;
+  const pHi = pMax ?? 1e5;
+  if (!(pHi > pLo)) return [];
+  const logMin = Math.log10(pLo);
+  const logMax = Math.log10(pHi);
+  const step = (logMax - logMin) / (nPoints - 1);
+  const pts: KCurvePoint[] = [];
+  for (let i = 0; i < nPoints; i++) {
+    const pOut = Math.pow(10, logMin + i * step);
+    // For zero-flow K measurement the relevant Knudsen pressure is P_out
+    // itself (inlet pressure is P_out/K which is much smaller and doesn't
+    // affect transition).
+    const kH = kHolweckFm > 1 ? kAtPressure(kHolweckFm, hHolweck, pOut) : 1;
+    const kT = kTurbo > 1 ? kAtPressure(kTurbo, hTurbo, pOut) : 1;
+    pts.push({ pOut, K: kT * kH });
+  }
+  return pts;
+}
+
 export function calcSCurve(
   result: PumpResult,
   pOut: number,

@@ -1,0 +1,4 @@
+/* reset; all theme styles in App.css */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body { margin: 0; background: #0f1116; color: #e5e7eb; }

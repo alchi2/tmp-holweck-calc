@@ -49,7 +49,8 @@ export type HolweckMethod =
   | "sickafus"
   | "boulon-audi"
   | "gaede"
-  | "sawada-1999";
+  | "sawada-1999"
+  | "sharipov-2005";
 
 export interface HolweckStage {
   id: string;
@@ -186,6 +187,25 @@ export function calcHolweckStage(
     logKmax = (2 * u * L) / Math.max(vThermal * hGap, 1e-9);
   } else if (method === "gaede") {
     logKmax = (u * L) / Math.max(vThermal * (h + delta), 1e-9);
+  } else if (method === "sharipov-2005") {
+    // Sharipov, Fahrenbach & Zipp, JVSTA 23(5), 1331 (2005). The full
+    // kinetic (BGK) model solves four auxiliary rarefied-gas flow
+    // problems (Poiseuille-longitudinal, Poiseuille-transverse,
+    // Couette-longitudinal, Couette-transverse) in a rectangular groove
+    // cross-section and superposes them via Eqs. 46 & 52 of the paper:
+    //   S_max = (2πR·U·ℓ / ℓ_z²) · ℓ · [G_z^C − (ℓ_z/ℓ_x)·G_x^C] · sinα·cosα
+    // where G_z^C, G_x^C are tabulated Couette flow-rate coefficients.
+    // Implementing the BGK table lookup is out of scope here; we use the
+    // free-molecular limit values (δ→0): G_z^C ≈ 1.0, G_x^C ≈ 0.35
+    // (Sharipov §IV, Table II). For K_max we integrate the zero-flow
+    // condition with Sharipov's ℓ_z/ℓ (= s/h) scaling:
+    //   ln K = (U·sinα·cosα / v_m) · (H / h) · [1 − (w/s)·(G_x^P/G_z^P)]
+    // with G_x^P/G_z^P ≈ 0.4 at δ→0 (from Sharipov kinetic tables).
+    const GxP_over_GzP = 0.4;
+    const leak = Math.max(1 - (w / s) * GxP_over_GzP, 0.05);
+    logKmax =
+      (u * Math.sin(thetaRad) * Math.cos(thetaRad) * L * leak) /
+      Math.max(vThermal * h, 1e-9);
   } else if (method === "sawada-1999") {
     // Sawada & Sugiyama, JVSTA 17(4), 2069 (1999). In the free-molecule
     // limit (Sec. II B, Eqs. 5–9) the 1D momentum balance along the
@@ -200,8 +220,11 @@ export function calcHolweckStage(
     // weight κ = exp(-8·c₂·y_m/λ) (his Eq. 10) to obtain K(P); here we
     // apply that via the separate kAtPressure() transitional correction
     // in pump.ts.
-    const sigma = (h + delta) / Math.max(delta, 1e-9);
-    const hSawada = h * (1 + w / (s * sigma));
+    // Back-leak effective gap h_S includes the δ²/h leakage through the
+    // ridge (same functional form as Sickafus hEff but without sinθ):
+    //   h_S = h + (w/s) · (δ² / h) · (1/cosα)
+    const hSawada =
+      h + (w / s) * ((delta * delta) / h) / Math.max(Math.cos(thetaRad), 1e-3);
     logKmax =
       (u * Math.cos(thetaRad) * L) / Math.max(vThermal * hSawada, 1e-9);
   } else {

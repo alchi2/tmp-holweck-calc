@@ -275,6 +275,9 @@ export default function App() {
                 <option value="sawada-1999">
                   Sawada-Sugiyama 1999 (молек.-слип.-вязк.)
                 </option>
+                <option value="sharipov-2005">
+                  Sharipov-Fahrenbach-Zipp 2005 (BGK-кинетика)
+                </option>
               </select>
             </label>
           )}

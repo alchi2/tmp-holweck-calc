@@ -1,8 +1,39 @@
 import type { PumpResult } from "../lib/pump";
+import { calcSCurve } from "../lib/pump";
 import { fmt } from "../lib/format";
+import { SCurvePlot, type Series } from "./SCurvePlot";
+import type { Preset } from "../lib/presets";
 
-export function ResultsPanel({ result }: { result: PumpResult }) {
+export function ResultsPanel({
+  result,
+  outletPressure,
+  activePreset,
+}: {
+  result: PumpResult;
+  outletPressure: number;
+  activePreset: Preset | null;
+}) {
   const { turbo, holweck } = result;
+
+  const showPlot = result.mode === "holweck" || result.mode === "combined";
+  const calcCurve = showPlot ? calcSCurve(result, outletPressure) : [];
+  const series: Series[] = [];
+  if (calcCurve.length > 0) {
+    series.push({
+      label: `Расчёт при P_вых = ${fmt(outletPressure, 2)} Па`,
+      color: "#4f9dff",
+      points: calcCurve.map((p) => ({ pIn: p.pIn, S: p.S })),
+    });
+  }
+  if (showPlot && activePreset?.sCurve && activePreset.sCurve.length > 0) {
+    series.push({
+      label: `Эксперимент / datasheet — ${activePreset.label}`,
+      color: "#f0a35c",
+      points: activePreset.sCurve,
+      dashed: true,
+      markers: true,
+    });
+  }
 
   return (
     <>
@@ -44,6 +75,26 @@ export function ResultsPanel({ result }: { result: PumpResult }) {
           {result.diagnostics.map((d, i) => (
             <div key={i}>⚠ {d}</div>
           ))}
+        </div>
+      )}
+
+      {showPlot && (
+        <div className="panel-subsection">
+          <h3>
+            Кривая быстроты действия S(P_вх) при P_вых = {fmt(outletPressure, 2)} Па
+          </h3>
+          <p className="muted small">
+            S(P_вх) = S_max · (1 − P_вых / (K · P_вх)). При P_вх = P_вых/K кривая
+            пересекает ноль (стагнация). Меняйте «Давление форвакуума P_вых»
+            в общих параметрах — наклон кривой изменится.
+          </p>
+          {series.length > 0 ? (
+            <SCurvePlot series={series} />
+          ) : (
+            <p className="muted small">
+              Не удалось построить: K ≤ 1 или S = 0 (проверьте параметры).
+            </p>
+          )}
         </div>
       )}
 

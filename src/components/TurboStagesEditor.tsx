@@ -1,5 +1,7 @@
+import { useRef, useState } from "react";
 import type { Stage } from "../lib/tmp";
 import { mkTurboStage } from "../lib/turboFactory";
+import { csvToStages, stagesToCSV, CSV_EXAMPLE } from "../lib/csv";
 import { NumberInput } from "./NumberInput";
 
 export function TurboStagesEditor({
@@ -42,14 +44,80 @@ export function TurboStagesEditor({
     setStages(next);
   }
 
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<string>("");
+
+  function downloadFile(name: string, content: string) {
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 500);
+  }
+  function onExport() {
+    downloadFile("turbo-stages.csv", stagesToCSV(stages));
+  }
+  function onExample() {
+    downloadFile("turbo-stages-example.csv", CSV_EXAMPLE);
+  }
+  function onImportClick() {
+    fileRef.current?.click();
+  }
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setImportError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      const { stages: parsed, errors } = csvToStages(text);
+      if (errors.length > 0) {
+        setImportError(errors.join(" • "));
+      }
+      if (parsed.length > 0) {
+        setStages(parsed);
+      } else if (errors.length === 0) {
+        setImportError("Ни одной корректной строки не найдено.");
+      }
+      if (fileRef.current) fileRef.current.value = "";
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <>
       <div className="panel-header">
         <h2>Турбо-ступени</h2>
-        <button type="button" className="primary" onClick={addStage}>
-          + Добавить ступень
-        </button>
+        <div className="stage-actions">
+          <button type="button" onClick={onExample} title="Скачать пример CSV">
+            Пример CSV
+          </button>
+          <button type="button" onClick={onImportClick} title="Импорт CSV">
+            Импорт CSV
+          </button>
+          <button
+            type="button"
+            onClick={onExport}
+            title="Экспорт текущих ступеней в CSV"
+            disabled={stages.length === 0}
+          >
+            Экспорт CSV
+          </button>
+          <button type="button" className="primary" onClick={addStage}>
+            + Добавить ступень
+          </button>
+        </div>
       </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".csv,text/csv"
+        style={{ display: "none" }}
+        onChange={onFileChange}
+      />
+      {importError && <div className="csv-error">Ошибки CSV: {importError}</div>}
 
       {stages.length === 0 && (
         <p className="muted small">

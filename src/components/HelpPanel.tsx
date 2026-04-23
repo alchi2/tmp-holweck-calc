@@ -265,6 +265,66 @@ export function HelpPanel() {
       </section>
 
       <section>
+        <h3>6a. Альтернативные методики расчёта</h3>
+        <p>В приложении можно переключать формулу для K в обеих секциях.</p>
+        <h4>Турбо-ступени:</h4>
+        <ul>
+          <li>
+            <b>Kruger 1960 fit</b> (по умолчанию): ln K = 8.55·C·exp(−α/18.7°)·g(s/b),
+            калибровано под Монте-Карло таблицы Kruger. Лучше всего при α = 10°–50°,
+            s/b = 0.3–2.
+          </li>
+          <li>
+            <b>Bernhardt 1983</b>: ln K = 2·C·sinα·cosα / (s/b + 0.3·sinα).
+            Замкнутая форма, лучше сходится при больших s/b (типичные коммерческие
+            ТМН).
+          </li>
+          <li>
+            <b>Sawada-Hirata 1974</b>: K = exp(2·C·tanα / (1 + (s/b)·tanα)).
+            Решение кинетического уравнения первого порядка; наиболее точно при
+            больших C и лёгких газах.
+          </li>
+        </ul>
+        <h4>Holweck-ступень:</h4>
+        <ul>
+          <li>
+            <b>Sickafus 1961 / Jousten (по умолчанию)</b>: ln K = u·sinθ·cosθ·L /
+            (v_m·h_eff), где h_eff учитывает обратный поток через land.
+          </li>
+          <li>
+            <b>Boulon-Audi (TwisTorr)</b>: ln K = 2·u·L / (v_m·(h + δ²/h)) —
+            коррекция для малых углов θ (spiral disk).
+          </li>
+          <li>
+            <b>Gaede 1913 Couette</b>: ln K = u·L / (v_m·(h + δ)) — классический
+            вязкий предел, нижняя граница.
+          </li>
+        </ul>
+        <p className="muted small">
+          На одной и той же геометрии разные методики дают K в пределах ≈×3 друг
+          от друга. Если ни одна не воспроизводит эталон, это указывает на ошибку
+          геометрии (глубина, зазор) или необходимость DSMC/кинетической модели.
+        </p>
+      </section>
+
+      <section>
+        <h3>6b. CSV-импорт турбо-ступеней</h3>
+        <p>
+          На вкладке «Турбо-ступени» кнопки «Пример CSV», «Импорт CSV», «Экспорт
+          CSV». Формат (одна строка — одна ступень):
+        </p>
+        <pre className="code">
+id,outerDiameter,hubDiameter,tipClearance,axialGap,{"\n"}
+rotorAngleDeg,rotorCount,rotorHeight,{"\n"}
+statorAngleDeg,statorCount,statorHeight
+        </pre>
+        <p className="muted small">
+          Длины в метрах, углы в градусах. Строки, начинающиеся с «#»,
+          игнорируются. Файл можно подготовить в Excel или LibreOffice Calc.
+        </p>
+      </section>
+
+      <section>
         <h3>7. Ограничения модели</h3>
         <ul>
           <li>

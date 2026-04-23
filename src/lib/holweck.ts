@@ -45,6 +45,8 @@
 
 import { R_GAS, mostProbableThermalVelocity } from "./tmp";
 
+export type HolweckMethod = "sickafus" | "boulon-audi" | "gaede";
+
 export interface HolweckStage {
   id: string;
   /** Outer rotor diameter [m]. */
@@ -106,6 +108,8 @@ export interface HolweckInputs {
   /** Gas inlet pressure [Pa] used only for power estimate. */
   inletPressure: number;
   stages: HolweckStage[];
+  /** Calculation methodology. Default: "sickafus". */
+  method?: HolweckMethod;
 }
 
 export interface HolweckCalc {
@@ -128,6 +132,7 @@ export function calcHolweckStage(
   inletPressure: number,
   molarMass: number,
   temperature: number,
+  method: HolweckMethod = "sickafus",
 ): HolweckResult {
   const D = Math.max(stage.rotorDiameter, 1e-4);
   const u = omega * D * 0.5;
@@ -155,13 +160,25 @@ export function calcHolweckStage(
   const hEff =
     h + (w / s) * ((delta * delta) / h) * (1 / Math.max(Math.cos(thetaRad), 1e-3));
 
-  //   ln K_max = (u · sin θ · cos θ · L) / (v_m · h_eff)
-  // Multi-start grooves do NOT multiply K (same path length).
-  // Sickafus argument: for multiple-start spirals the drag flow rises as n,
-  // but so does the back-flow cross-section, so K is unchanged.
-  const logKmax =
-    (u * Math.sin(thetaRad) * Math.cos(thetaRad) * L) /
-    Math.max(vThermal * hEff, 1e-9);
+  // ln K_max depends on selected methodology:
+  //   "sickafus"    — Sickafus 1961 / Jousten §7.4 engineering form:
+  //                   ln K = u·sinθ·cosθ·L / (v_m·h_eff)
+  //   "boulon-audi" — Boulon & Audi (Agilent TwisTorr 1997) corrected form
+  //                   accounting for disk-stage geometry at low θ:
+  //                   ln K = 2·u·L / (v_m·(h + δ²/h))
+  //   "gaede"       — Gaede (1913) classical Couette-flow limit, ignores θ:
+  //                   ln K = u·L / (v_m·(h + δ)) — lower bound.
+  let logKmax: number;
+  if (method === "boulon-audi") {
+    const hGap = h + (delta * delta) / h;
+    logKmax = (2 * u * L) / Math.max(vThermal * hGap, 1e-9);
+  } else if (method === "gaede") {
+    logKmax = (u * L) / Math.max(vThermal * (h + delta), 1e-9);
+  } else {
+    logKmax =
+      (u * Math.sin(thetaRad) * Math.cos(thetaRad) * L) /
+      Math.max(vThermal * hEff, 1e-9);
+  }
   const kMax = Math.exp(Math.min(logKmax, 50));
 
   // Geometric consistency check. In a multi-start Holweck the n helical
@@ -223,6 +240,7 @@ export function calcHolweck(inputs: HolweckInputs): HolweckCalc {
   let pGasTotal = 0;
   let kTotal = 1;
 
+  const method: HolweckMethod = inputs.method ?? "sickafus";
   for (const st of inputs.stages) {
     const r = calcHolweckStage(
       st,
@@ -231,6 +249,7 @@ export function calcHolweck(inputs: HolweckInputs): HolweckCalc {
       inputs.inletPressure,
       inputs.molarMass,
       inputs.temperature,
+      method,
     );
     results.push(r);
     kTotal *= r.kMax;

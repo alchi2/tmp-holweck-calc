@@ -27,7 +27,13 @@ export interface Preset {
     K?: number;
     W?: number;
     sMaxLps?: number;
+    /** Forevacuum pressure [Pa] at which the expected K and S apply. */
+    outletPressure?: number;
   };
+  /** Digitized S(P_in) reference curve from datasheet/paper. */
+  sCurve?: { pIn: number; S: number }[];
+  /** Digitized K(P_out) reference curve. */
+  kCurve?: { pOut: number; K: number }[];
   notes?: string;
 }
 
@@ -227,9 +233,9 @@ export const PRESETS: Preset[] = [
     ],
     kind: "holweckSingle",
     coriolisEnabled: false,
-    expected: { K: 1e3, sMaxLps: 15 },
+    expected: { K: 1e3, sMaxLps: 15, outletPressure: 100 },
     notes:
-      "Типичная одноступенчатая Holweck-секция. K в диапазоне 500–2000, S ~15 л/с по N₂.",
+      "Типичная одноступенчатая Holweck-секция. K в диапазоне 500–2000, S ~15 л/с по N₂, форвакуум ≤ 100 Па.",
   },
   {
     id: "holweck-giors-2006",
@@ -260,7 +266,18 @@ export const PRESETS: Preset[] = [
     ],
     kind: "holweckSingle",
     coriolisEnabled: false,
-    expected: { K: 500, sMaxLps: 5 },
+    expected: { K: 500, sMaxLps: 5, outletPressure: 10 },
+    // Giors 2006 Fig.6 — типичный вид S(P_in) для Holweck в свободно-молекулярном режиме.
+    sCurve: [
+      { pIn: 1e-4, S: 5 },
+      { pIn: 1e-3, S: 5 },
+      { pIn: 1e-2, S: 4.9 },
+      { pIn: 0.1, S: 4.2 },
+      { pIn: 1, S: 3.0 },
+      { pIn: 5, S: 1.0 },
+      { pIn: 8, S: 0.3 },
+      { pIn: 10, S: 0 },
+    ],
     notes:
       "Значения K и S извлечены из графиков статьи, геометрия по описанию в тексте. Указанные эталонные значения — порядок величины.",
   },
@@ -293,7 +310,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "holweckSingle",
     coriolisEnabled: false,
-    expected: { K: 10, sMaxLps: 8 },
+    expected: { K: 10, sMaxLps: 8, outletPressure: 10 },
     notes:
       "Для He v_m в 2.6 раза выше, чем для N₂ → показатель экспоненты K падает, K ≈ 10.",
   },
@@ -329,9 +346,23 @@ export const PRESETS: Preset[] = [
     ],
     kind: "combined",
     coriolisEnabled: true,
-    expected: { K: 1e9, sMaxLps: 60 },
+    expected: { K: 1e9, sMaxLps: 60, outletPressure: 1200 },
+    // Типичная кривая S(P_in) по datasheet Agilent TwisTorr 74 FS.
+    // S плоская от 10⁻⁸ до ~10⁻³ мбар (1e-1 Па), затем спадает.
+    // Foreline tolerance (P_out, при котором K ещё ≥100) = 12 мбар ≈ 1200 Па.
+    sCurve: [
+      { pIn: 1e-7, S: 60 },
+      { pIn: 1e-5, S: 60 },
+      { pIn: 1e-3, S: 60 },
+      { pIn: 1e-2, S: 60 },
+      { pIn: 0.1, S: 60 },
+      { pIn: 1, S: 55 },
+      { pIn: 5, S: 30 },
+      { pIn: 10, S: 10 },
+      { pIn: 20, S: 0 },
+    ],
     notes:
-      "Siegbahn-тип (спиральный плоский) аппроксимирован как Holweck-дисковый эквивалент. Геометрия оценена по габаритам из datasheet.",
+      "Siegbahn-тип (спиральный плоский) аппроксимирован как Holweck-дисковый эквивалент. S(P_in) и foreline tolerance взяты из Agilent datasheet.",
   },
   {
     id: "hipace-300-combined",
@@ -363,8 +394,20 @@ export const PRESETS: Preset[] = [
     ],
     kind: "combined",
     coriolisEnabled: true,
-    expected: { K: 1e11, sMaxLps: 260 },
+    expected: { K: 1e11, sMaxLps: 260, outletPressure: 1500 },
+    // Pfeiffer HiPace 300: S_N2 = 260 L/s, K_N2 > 1e11, max foreline 15 мбар.
+    // Типичная форма кривой S(P_in) для hybrid TMP+Holweck.
+    sCurve: [
+      { pIn: 1e-7, S: 260 },
+      { pIn: 1e-5, S: 260 },
+      { pIn: 1e-3, S: 260 },
+      { pIn: 0.1, S: 260 },
+      { pIn: 1, S: 250 },
+      { pIn: 10, S: 150 },
+      { pIn: 30, S: 40 },
+      { pIn: 50, S: 0 },
+    ],
     notes:
-      "Геометрия оценена по общему классу. Holweck-ступень на выходе — типично h=0.3–0.5 мм, L=30–60 мм.",
+      "Геометрия оценена по общему классу. S(P_in) и foreline — по datasheet Pfeiffer. Holweck-ступень на выходе — типично h=0.3–0.5 мм.",
   },
 ];

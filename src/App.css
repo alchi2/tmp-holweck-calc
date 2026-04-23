@@ -366,3 +366,30 @@ a { color: var(--accent); }
   width: auto;
   margin: 0;
 }
+
+.panel-subsection {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #2b303d;
+}
+.csv-error {
+  background: #432;
+  color: #fca5a5;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.splot {
+  background: #111418;
+  border-radius: 4px;
+  display: block;
+  max-width: 720px;
+}
+.plot-empty {
+  padding: 30px;
+  text-align: center;
+  color: #9aa4b2;
+  background: #111418;
+  border-radius: 4px;
+}

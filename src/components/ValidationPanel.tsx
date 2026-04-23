@@ -7,11 +7,13 @@ export function ValidationPanel({
   onSelect,
   result,
   activePreset,
+  outletPressure,
 }: {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   result: PumpResult;
   activePreset: Preset | null;
+  outletPressure: number;
 }) {
   const groups: { title: string; presets: Preset[] }[] = [
     {
@@ -61,7 +63,11 @@ export function ValidationPanel({
       </label>
 
       {activePreset && (
-        <ComparisonView preset={activePreset} result={result} />
+        <ComparisonView
+          preset={activePreset}
+          result={result}
+          outletPressure={outletPressure}
+        />
       )}
     </>
   );
@@ -77,9 +83,11 @@ function deviationColor(dev: number): string {
 function ComparisonView({
   preset,
   result,
+  outletPressure,
 }: {
   preset: Preset;
   result: PumpResult;
+  outletPressure: number;
 }) {
   const { expected } = preset;
   let kCalc: number | undefined;
@@ -92,7 +100,21 @@ function ComparisonView({
     kCalc = result.kTotal;
     wCalc = result.turbo?.wInlet;
   }
-  const sCalc = result.sMaxLps;
+  // For Holweck / combined presets we derive S at the actual operating
+  // foreline pressure: S_op = S_max · (1 − P_out/(K · P_in)). This matches
+  // how datasheets report S (measured at a specific foreline tolerance).
+  let sCalc = result.sMaxLps;
+  const needsForelineCorrection =
+    (preset.kind === "holweckSingle" || preset.kind === "combined") &&
+    expected.outletPressure !== undefined &&
+    outletPressure > 0 &&
+    result.kTotal > 1;
+  if (needsForelineCorrection) {
+    const pIn = preset.inletPressure > 0 ? preset.inletPressure : 1e-3;
+    const pOut = expected.outletPressure ?? outletPressure;
+    const factor = Math.max(0, 1 - pOut / (result.kTotal * pIn));
+    sCalc = result.sMaxLps * factor;
+  }
 
   const rows: {
     label: string;
@@ -103,7 +125,13 @@ function ComparisonView({
   if (expected.W !== undefined)
     rows.push({ label: "W (вход)", calc: wCalc, exp: expected.W });
   if (expected.sMaxLps !== undefined)
-    rows.push({ label: "S [л/с]", calc: sCalc, exp: expected.sMaxLps });
+    rows.push({
+      label: needsForelineCorrection
+        ? `S [л/с] (P_вых = ${expected.outletPressure ?? outletPressure} Па)`
+        : "S [л/с]",
+      calc: sCalc,
+      exp: expected.sMaxLps,
+    });
 
   return (
     <div className="preset-panel">

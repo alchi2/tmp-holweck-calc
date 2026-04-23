@@ -1,32 +1,21 @@
 // Unified pump model: axial turbo + Holweck drag, with 3 operating modes.
 //
-// turbo-only    : use calculate() on the axial stack, no drag stages.
-// holweck-only  : use calcHolweck() on the drum stages, no axial blades.
+// turbo-only    : axial stack, no drag stages.
+// holweck-only  : drum stages only.
 // combined      : axial stack feeds a Holweck drum; K and S compose.
-//                 S_max  = S of the FIRST stage (whichever section is
-//                          at the inlet). Typically turbo is at the top
-//                          with high S, Holweck at the bottom for high K.
-//                 K_max  = K_turbo · K_holweck (multiplicative).
-//
-// Pumping-speed series rule:
-//   In a real combined pump, the turbo inlet limits S_max, while the
-//   Holweck section just has to pass the throughput without choking.
-//   If S_turbo_inlet > S_holweck_drag, the pump is Holweck-limited at
-//   the mating point (rare in practice). We always report the minimum
-//   of the two and a diagnostic note.
-//
-// Power: sum of gas power from both sections plus a rough windage term.
 
 import {
   calculate,
   type CalcResult,
   type Inputs as TurboInputs,
   type Stage as TurboStage,
+  type TurboMethod,
 } from "./tmp";
 import {
   calcHolweck,
   type HolweckCalc,
   type HolweckInputs,
+  type HolweckMethod,
   type HolweckStage,
 } from "./holweck";
 
@@ -36,24 +25,25 @@ export interface PumpInputs {
   mode: PumpMode;
   rpm: number;
   temperature: number;
+  /** Inlet (high-vacuum side) pressure [Pa]. */
   inletPressure: number;
+  /** Forevacuum (exhaust) pressure [Pa]. Used for the S(P) curve. */
+  outletPressure?: number;
   molarMass: number;
   coriolisEnabled?: boolean;
   turboStages: TurboStage[];
   holweckStages: HolweckStage[];
+  turboMethod?: TurboMethod;
+  holweckMethod?: HolweckMethod;
 }
 
 export interface PumpResult {
   mode: PumpMode;
   turbo?: CalcResult;
   holweck?: HolweckCalc;
-  /** Total compression ratio K. */
   kTotal: number;
-  /** Inlet pumping speed [L/s]. */
   sMaxLps: number;
-  /** Total power [W]. */
   pTotal: number;
-  /** Text diagnostics from all sub-models plus combined-mode notes. */
   diagnostics: string[];
 }
 
@@ -65,9 +55,7 @@ export function calculatePump(inp: PumpInputs): PumpResult {
 
   if (inp.mode === "turbo" || inp.mode === "combined") {
     if (inp.turboStages.length === 0) {
-      diagnostics.push(
-        "Турбо-ступени не заданы, но режим требует их. Расчёт пропущен.",
-      );
+      diagnostics.push("Турбо-ступени не заданы, но режим требует их. Расчёт пропущен.");
     } else {
       const tIn: TurboInputs = {
         rpm: inp.rpm,
@@ -76,6 +64,7 @@ export function calculatePump(inp: PumpInputs): PumpResult {
         molarMass: inp.molarMass,
         stages: inp.turboStages,
         coriolisEnabled: inp.coriolisEnabled,
+        method: inp.turboMethod,
       };
       turbo = calculate(tIn);
       diagnostics.push(...turbo.diagnostics);
@@ -84,12 +73,8 @@ export function calculatePump(inp: PumpInputs): PumpResult {
 
   if (inp.mode === "holweck" || inp.mode === "combined") {
     if (inp.holweckStages.length === 0) {
-      diagnostics.push(
-        "Ступени Holweck не заданы, но режим требует их. Расчёт пропущен.",
-      );
+      diagnostics.push("Ступени Holweck не заданы, но режим требует их. Расчёт пропущен.");
     } else {
-      // Pressure into the Holweck is higher than the turbo inlet pressure
-      // (turbo compresses gas into it). Use turbo outlet pressure if both.
       const pIntoHolweck =
         inp.mode === "combined" && turbo
           ? inp.inletPressure * turbo.kTotal
@@ -100,6 +85,7 @@ export function calculatePump(inp: PumpInputs): PumpResult {
         inletPressure: pIntoHolweck,
         molarMass: inp.molarMass,
         stages: inp.holweckStages,
+        method: inp.holweckMethod,
       };
       holweck = calcHolweck(hIn);
       diagnostics.push(...holweck.diagnostics);
@@ -122,23 +108,14 @@ export function calculatePump(inp: PumpInputs): PumpResult {
     const kT = turbo?.kTotal ?? 1;
     const kH = holweck?.kTotal ?? 1;
     kTotal = kT * kH;
-
-    // S at the pump inlet is set by the UPSTREAM section (turbo). Gas
-    // compressed by the turbo arrives at the Holweck at a higher pressure,
-    // so the Holweck only needs the drag flow at that higher density to
-    // keep up with throughput — which it does if S_drag_holweck · K_turbo
-    // > S_turbo_inlet. This is typical for well-matched hybrid pumps.
     const sT = turbo?.sMaxLps ?? 0;
     const sHDrag = holweck?.stages[0]?.sDrag ? holweck.stages[0].sDrag * 1000 : 0;
     sMaxLps = sT;
-
-    // Sanity: throughput at coupling vs Holweck drag capacity.
     if (sT > 0 && sHDrag > 0 && sHDrag * kT < sT) {
       diagnostics.push(
         "Holweck-секция может ограничивать поток: её drag-скорость недостаточна для сжатой турбо-порции.",
       );
     }
-
     pTotal = (turbo?.pTotal ?? 0) + (holweck?.pGasTotal ?? 0);
   }
 
@@ -151,4 +128,43 @@ export function calculatePump(inp: PumpInputs): PumpResult {
     pTotal,
     diagnostics,
   };
+}
+
+/**
+ * Compute the S(P_in) curve at fixed P_out (forevacuum pressure).
+ *
+ * Physical model (steady state, free-molecular, single-volume throat):
+ *   Q = S · P_in = S_max · (P_in − P_out / K_max)
+ *   ⇒ S(P_in) = S_max · (1 − P_out / (K_max · P_in))
+ *
+ * For P_in · K_max < P_out the pump stalls; we clamp S at 0.
+ *
+ * For the P_in axis we use 40 log-spaced points between
+ * 1.5·P_out/K_max and ~10⁻³·P_out (the usual pump operating range).
+ */
+export interface SCurvePoint {
+  pIn: number;
+  S: number;
+}
+
+export function calcSCurve(
+  result: PumpResult,
+  pOut: number,
+  nPoints = 60,
+): SCurvePoint[] {
+  if (!(result.sMaxLps > 0) || !(result.kTotal > 1) || !(pOut > 0)) return [];
+  const pStall = pOut / result.kTotal;
+  const pMax = Math.max(pOut * 0.5, pStall * 1e6);
+  const pMin = pStall * 1.02;
+  if (!(pMax > pMin)) return [];
+  const logMin = Math.log10(pMin);
+  const logMax = Math.log10(pMax);
+  const step = (logMax - logMin) / (nPoints - 1);
+  const pts: SCurvePoint[] = [];
+  for (let i = 0; i < nPoints; i++) {
+    const pIn = Math.pow(10, logMin + i * step);
+    const S = result.sMaxLps * (1 - pOut / (result.kTotal * pIn));
+    pts.push({ pIn, S: Math.max(0, S) });
+  }
+  return pts;
 }

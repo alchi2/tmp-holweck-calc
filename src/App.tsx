@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import "./App.css";
-import { GAS_LIBRARY, type GasKey, type Stage } from "./lib/tmp";
-import type { HolweckStage } from "./lib/holweck";
+import { GAS_LIBRARY, type GasKey, type Stage, type TurboMethod } from "./lib/tmp";
+import type { HolweckStage, HolweckMethod } from "./lib/holweck";
 import { calculatePump, type PumpMode } from "./lib/pump";
 import { PRESETS, type Preset } from "./lib/presets";
 
@@ -35,6 +35,9 @@ export default function App() {
   const [coriolisEnabled, setCoriolisEnabled] = useState(true);
 
   const [mode, setMode] = useState<PumpMode>("combined");
+  const [outletPressure, setOutletPressure] = useState<number>(500);
+  const [turboMethod, setTurboMethod] = useState<TurboMethod>("kruger");
+  const [holweckMethod, setHolweckMethod] = useState<HolweckMethod>("sickafus");
   const [turboStages, setTurboStages] = useState<Stage[]>([
     mkTurboStage("Т-1"),
     mkTurboStage("Т-2"),
@@ -55,20 +58,26 @@ export default function App() {
         rpm,
         temperature,
         inletPressure,
+        outletPressure,
         molarMass,
         turboStages,
         holweckStages,
         coriolisEnabled,
+        turboMethod,
+        holweckMethod,
       }),
     [
       mode,
       rpm,
       temperature,
       inletPressure,
+      outletPressure,
       molarMass,
       turboStages,
       holweckStages,
       coriolisEnabled,
+      turboMethod,
+      holweckMethod,
     ],
   );
 
@@ -98,6 +107,9 @@ export default function App() {
     );
     setHolweckStages(p.holweckStages.map((s) => ({ ...s })));
     setCoriolisEnabled(p.coriolisEnabled);
+    if (p.expected.outletPressure !== undefined) {
+      setOutletPressure(p.expected.outletPressure);
+    }
     setPresetId(p.id);
   }
 
@@ -160,13 +172,22 @@ export default function App() {
             onChange={setTemperature}
           />
           <NumberInput
-            label="Давление на входе"
+            label="Давление на входе P_вх"
             value={inletPressure}
             step={1e-5}
             min={0}
             unit="Па"
             onChange={setInletPressure}
-            help="Используется для оценки потребляемой мощности"
+            help="Рабочая точка на кривой S(P_вх); используется для мощности"
+          />
+          <NumberInput
+            label="Давление форвакуума P_вых"
+            value={outletPressure}
+            step={10}
+            min={0}
+            unit="Па"
+            onChange={setOutletPressure}
+            help="Задаёт форму кривой S(P_вх): падение у P_вх ≈ P_вых/K"
           />
           <label className="num-input">
             <span className="num-label">Газ</span>
@@ -206,6 +227,46 @@ export default function App() {
         </div>
       </section>
 
+      <section className="panel">
+        <h2>Методика расчёта</h2>
+        <div className="row">
+          {mode !== "holweck" && (
+            <label className="num-input">
+              <span className="num-label">
+                Турбо-ступени (K)
+              </span>
+              <select
+                value={turboMethod}
+                onChange={(e) => setTurboMethod(e.target.value as TurboMethod)}
+              >
+                <option value="kruger">Kruger 1960 fit (по умолчанию)</option>
+                <option value="bernhardt">Bernhardt 1983 closed-form</option>
+                <option value="sawada">Sawada-Hirata 1974 кинетическая</option>
+              </select>
+            </label>
+          )}
+          {mode !== "turbo" && (
+            <label className="num-input">
+              <span className="num-label">
+                Holweck-ступень (K)
+              </span>
+              <select
+                value={holweckMethod}
+                onChange={(e) => setHolweckMethod(e.target.value as HolweckMethod)}
+              >
+                <option value="sickafus">Sickafus/Jousten (по умолчанию)</option>
+                <option value="boulon-audi">Boulon-Audi (TwisTorr)</option>
+                <option value="gaede">Gaede 1913 классическая Couette</option>
+              </select>
+            </label>
+          )}
+        </div>
+        <p className="muted small">
+          Формулы всех методик приведены на вкладке Справка. Разные методики дают
+          K в пределах ≈×3 от друг друга в типичной геометрии.
+        </p>
+      </section>
+
       <nav className="tabs">
         {tabs
           .filter((t) => t.show !== false)
@@ -237,9 +298,16 @@ export default function App() {
             onSelect={loadPreset}
             result={result}
             activePreset={activePreset}
+            outletPressure={outletPressure}
           />
         )}
-        {tab === "results" && <ResultsPanel result={result} />}
+        {tab === "results" && (
+          <ResultsPanel
+            result={result}
+            outletPressure={outletPressure}
+            activePreset={activePreset}
+          />
+        )}
         {tab === "help" && <HelpPanel />}
       </section>
     </div>

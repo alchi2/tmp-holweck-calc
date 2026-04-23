@@ -132,6 +132,12 @@ function ComparisonView({
       calc: sCalc,
       exp: expected.sMaxLps,
     });
+  if (expected.powerW !== undefined)
+    rows.push({
+      label: `P [Вт] при P_вых = ${expected.outletPressure ?? outletPressure} Па`,
+      calc: result.pTotal,
+      exp: expected.powerW,
+    });
 
   return (
     <div className="preset-panel">

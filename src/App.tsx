@@ -272,6 +272,9 @@ export default function App() {
                 <option value="sickafus">Sickafus/Jousten (по умолчанию)</option>
                 <option value="boulon-audi">Boulon-Audi (TwisTorr)</option>
                 <option value="gaede">Gaede 1913 классическая Couette</option>
+                <option value="sawada-1999">
+                  Sawada-Sugiyama 1999 (молек.-слип.-вязк.)
+                </option>
               </select>
             </label>
           )}

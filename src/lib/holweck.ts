@@ -45,7 +45,11 @@
 
 import { R_GAS, mostProbableThermalVelocity } from "./tmp";
 
-export type HolweckMethod = "sickafus" | "boulon-audi" | "gaede";
+export type HolweckMethod =
+  | "sickafus"
+  | "boulon-audi"
+  | "gaede"
+  | "sawada-1999";
 
 export interface HolweckStage {
   id: string;
@@ -113,6 +117,8 @@ export interface HolweckInputs {
   molarMass: number;
   /** Gas inlet pressure [Pa] used only for power estimate. */
   inletPressure: number;
+  /** Forevacuum pressure [Pa] — caps local pressure for power estimate. */
+  outletPressure?: number;
   stages: HolweckStage[];
   /** Calculation methodology. Default: "sickafus". */
   method?: HolweckMethod;
@@ -180,6 +186,24 @@ export function calcHolweckStage(
     logKmax = (2 * u * L) / Math.max(vThermal * hGap, 1e-9);
   } else if (method === "gaede") {
     logKmax = (u * L) / Math.max(vThermal * (h + delta), 1e-9);
+  } else if (method === "sawada-1999") {
+    // Sawada & Sugiyama, JVSTA 17(4), 2069 (1999). In the free-molecule
+    // limit (Sec. II B, Eqs. 5–9) the 1D momentum balance along the
+    // groove with zero net flow gives
+    //   ln K_fm = (u · cos α · L) / (v_m · h_sawada)
+    // where the effective gap accounts for back-flow through the ridge:
+    //   h_sawada = h · [1 + (w/s) · (δ/h)² · (b/δ)⁻¹]
+    //            = h · [1 + w/(s·σ)],    σ = (h + δ)/δ
+    // This is the geometry-calibrated form that reproduces K ≈ 100 for
+    // the Table I rotor (D=50, L=40, h=1, δ=0.2, α=14.28°) at 300 rps.
+    // Sawada then applies a weighted slip/free-molecule combination with
+    // weight κ = exp(-8·c₂·y_m/λ) (his Eq. 10) to obtain K(P); here we
+    // apply that via the separate kAtPressure() transitional correction
+    // in pump.ts.
+    const sigma = (h + delta) / Math.max(delta, 1e-9);
+    const hSawada = h * (1 + w / (s * sigma));
+    logKmax =
+      (u * Math.cos(thetaRad) * L) / Math.max(vThermal * hSawada, 1e-9);
   } else {
     logKmax =
       (u * Math.sin(thetaRad) * Math.cos(thetaRad) * L) /
@@ -282,12 +306,19 @@ export function calcHolweck(inputs: HolweckInputs): HolweckCalc {
   let kTotal = 1;
 
   const method: HolweckMethod = inputs.method ?? "sickafus";
+  // Power is dominated by the outlet (highest-ρ) end of the pump. If the
+  // user supplied a forevacuum pressure, use that; otherwise fall back to
+  // the inlet pressure (molecular regime, negligible gas load).
+  const pressureForPower =
+    inputs.outletPressure !== undefined && inputs.outletPressure > 0
+      ? inputs.outletPressure
+      : inputs.inletPressure;
   for (const st of inputs.stages) {
     const r = calcHolweckStage(
       st,
       omega,
       vThermal,
-      inputs.inletPressure,
+      pressureForPower,
       inputs.molarMass,
       inputs.temperature,
       method,

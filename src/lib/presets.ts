@@ -27,6 +27,8 @@ export interface Preset {
     K?: number;
     W?: number;
     sMaxLps?: number;
+    /** Nameplate / measured shaft power [W]. */
+    powerW?: number;
     /** Forevacuum pressure [Pa] at which the expected K and S apply. */
     outletPressure?: number;
     /**
@@ -204,7 +206,7 @@ export const PRESETS: Preset[] = [
     holweckStages: [],
     kind: "turboFull",
     coriolisEnabled: true,
-    expected: { sMaxLps: 260 },
+    expected: { sMaxLps: 260, powerW: 300, outletPressure: 100 },
     notes:
       "Только осевой стек. Полная компрессия K>1e11 у реального насоса включает выходную Holweck-ступень.",
   },
@@ -333,6 +335,52 @@ export const PRESETS: Preset[] = [
     notes:
       "Для He v_m в 2.6 раза выше, чем для N₂ → показатель экспоненты K падает, K ≈ 10.",
   },
+  {
+    id: "sawada-1999",
+    label: "Sawada & Sugiyama 1999 (D=50, L=40, 10 канавок, N₂)",
+    description:
+      "Экспериментальный ротор из статьи Sawada-Sugiyama 1999 (JVSTA 17, 2069). Единственная Holweck-секция, 300 об/с, предельный вакуум 2.7·10⁻⁴ Па. Проверочные данные K(P_вых) — Fig. 4.",
+    source:
+      "T. Sawada, W. Sugiyama — J. Vac. Sci. Technol. A 17(4), 2069–2074 (1999)",
+    sourceUrl: "https://doi.org/10.1116/1.581729",
+    rpm: 18000, // 300 rps
+    temperature: 293.15,
+    inletPressure: 1e-3,
+    gas: "air",
+    customM: 0.028,
+    mode: "holweck",
+    turboStages: [],
+    holweckStages: [
+      {
+        id: "H-1",
+        rotorDiameter: 0.050,
+        length: 0.040,
+        helixAngleDeg: 14.28,
+        grooveDepth: 0.001,
+        grooveWidth: 0.002,
+        landWidth: 0.00188,
+        radialClearance: 0.0002,
+        startCount: 10,
+        grooveOnStator: false,
+      },
+    ],
+    kind: "holweckSingle",
+    coriolisEnabled: false,
+    expected: { K: 100, sMaxLps: 2.5, outletPressure: 1, qMaxPaLps: 100 },
+    // Оцифровка Fig. 4 Sawada 1999: K(P_вых) при 300 rps (без протечки).
+    // Плато K ≈ 100 в молекулярном пределе, спад при P_вых > 10² Па,
+    // K → 1 при P_вых ≈ 10⁴ Па.
+    kCurve: [
+      { pOut: 10, K: 100 },
+      { pOut: 100, K: 95 },
+      { pOut: 300, K: 60 },
+      { pOut: 1000, K: 20 },
+      { pOut: 3000, K: 4 },
+      { pOut: 10000, K: 1.1 },
+    ],
+    notes:
+      "Геометрия из Table I статьи. Экспериментальные данные Fig. 4–5 используются для проверки Sawada-перехода K(P_вых). Ожидаемое K ≈ 100 (плато в молекулярном пределе).",
+  },
 
   // ── Combined turbo+Holweck commercial pumps ────────────────────────────
   {
@@ -365,7 +413,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "combined",
     coriolisEnabled: true,
-    expected: { K: 1e9, sMaxLps: 60, outletPressure: 1, qMaxPaLps: 200 },
+    expected: { K: 1e9, sMaxLps: 60, outletPressure: 1, qMaxPaLps: 200, powerW: 150 },
     // Agilent TwisTorr 74 FS: S плоская от 10⁻₇ до ~1 Па, вязкий спад
     // в диапазоне 5–50 Па. Foreline tolerance = 12 мбар ≈ 1200 Па.
     sCurve: [
@@ -413,7 +461,7 @@ export const PRESETS: Preset[] = [
     ],
     kind: "combined",
     coriolisEnabled: true,
-    expected: { K: 1e11, sMaxLps: 260, outletPressure: 1, qMaxPaLps: 700 },
+    expected: { K: 1e11, sMaxLps: 260, outletPressure: 1, qMaxPaLps: 700, powerW: 300 },
     // Pfeiffer HiPace 300: S_N2 = 260 L/s, max foreline 15 мбар.
     // Datasheet graph: S плоская до ~1 Па, вязкий спад 5–50 Па.
     sCurve: [

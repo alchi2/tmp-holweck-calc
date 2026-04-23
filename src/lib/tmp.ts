@@ -50,6 +50,7 @@ export interface Inputs {
   rpm: number;             // rotation frequency [rev/min]
   temperature: number;     // gas temperature [K]
   inletPressure: number;   // reference inlet pressure for power calc [Pa]
+  outletPressure?: number; // forevacuum pressure [Pa] — caps local pressure used in shear power calculation
   molarMass: number;       // kg/mol (resolved from gas selection)
   stages: Stage[];
   /** When false, disable the 3D Coriolis angular shift (set α_eff = α).
@@ -275,21 +276,33 @@ export function calculate(inputs: Inputs): CalcResult {
     const kStage = rotor.kStage * stator.kStage; // stator.kStage ~= 1
     const wStage = seriesW([rotor.wStage, stator.wStage]);
 
-    const rhoLocal = (pLocal * inputs.molarMass) / (R_GAS * inputs.temperature);
-    const alphaR = (st.rotor.angleDeg * Math.PI) / 180;
-    const bladeFaceArea = annularArea;
-    const pGas =
-      rhoLocal *
-      vThermal *
-      rotor.uMean *
-      rotor.uMean *
-      bladeFaceArea *
-      Math.sin(alphaR) *
-      Math.cos(alphaR);
+    // Gas-side losses are dominated by the outlet region where the pressure
+    // (and hence density) is highest. We use the local pressure but cap it at
+    // the user's forevacuum pressure — there is no physical pressure inside
+    // the pump higher than the forevacuum during normal operation (gas has
+    // somewhere to go). This replaces the earlier exponential growth of
+    // pLocal through the stack which gave P_total ≫ nameplate.
+    const pOutCap = inputs.outletPressure ?? pLocal * 10;
+    const pForPower = Math.min(pLocal, pOutCap);
+    const rhoLocal =
+      (pForPower * inputs.molarMass) / (R_GAS * inputs.temperature);
 
+    // Viscous/molecular shear on the rotor blade surfaces (both sides) and
+    // tip clearance. In molecular regime, shear stress τ ≈ ρ·v_m·u/4 per
+    // side; the factor 0.5 is the accommodation coefficient. In viscous
+    // regime this transitions to μ·u/h_gap which gives a similar order of
+    // magnitude at transition pressure.
+    const alphaR = (st.rotor.angleDeg * Math.PI) / 180;
+    const bladeSurfaceArea =
+      2 * st.rotor.count * st.rotor.height * (rOuter - rHub);
     const tipArea = 2 * Math.PI * rOuter * st.rotor.height;
-    const pWind =
-      rhoLocal * vThermal * rotor.uMean * rotor.uMean * tipArea * 0.05;
+    const totalShearArea =
+      bladeSurfaceArea * Math.cos(alphaR) + tipArea;
+    const shearStress = 0.5 * rhoLocal * vThermal * rotor.uMean * 0.25;
+    const pGas = shearStress * totalShearArea * rotor.uMean;
+
+    // Windage component — small at vacuum, used only for legacy reporting.
+    const pWind = rhoLocal * rotor.uMean ** 3 * tipArea * 1e-3;
 
     pGasTotal += pGas;
     pWindage += pWind;

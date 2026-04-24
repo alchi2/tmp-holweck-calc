@@ -288,7 +288,6 @@ export function calcSCurve(
 
   const hHolweck = smallestHolweckGap(result);
   const hTurbo = smallestTurboGap(inputs);
-  const hAny = Math.min(hHolweck, hTurbo);
 
   // Plot range: from the stall edge down a bit for context, up to where the
   // throughput-limited curve (Q_max / P_in) has dropped to ~0.5% of S_max.
@@ -304,13 +303,44 @@ export function calcSCurve(
   const pts: SCurvePoint[] = [];
   for (let i = 0; i < nPoints; i++) {
     const pIn = Math.pow(10, logMin + i * step);
-    const pAvg = Math.sqrt(pIn * pOutSafe);
 
-    const kH = kHolweckFm > 1 ? kAtPressure(kHolweckFm, hHolweck, pAvg) : 1;
-    const kT = kTurbo > 1 ? kAtPressure(kTurbo, hTurbo, pAvg) : 1;
+    // Compute the intermediate pressure between turbo and Holweck sections
+    // at zero-flow balance: the foreline pressure divided by the local K of
+    // the downstream (Holweck) section. This is used as the local pressure
+    // for computing the turbo outlet / Holweck inlet Knudsen number.
+    //   P_mid ≈ max(P_in · K_turbo, P_out / K_hol)
+    // but we cap the turbo amplification at its molecular K_fm.
+    const kH_loose = kHolweckFm > 1 ? kAtPressure(kHolweckFm, hHolweck, pOutSafe) : 1;
+    const pMid = Math.max(pIn, pOutSafe / Math.max(kH_loose, 1));
+
+    // Use per-section local pressure and gap for Knudsen transition:
+    //   - turbo sees P at its inlet = P_in; its gap is the axial gap (mm).
+    //   - Holweck sees P at its inlet = P_mid ≈ P_out / K_hol; its gap is
+    //     the groove depth / radial clearance (0.1–0.5 mm).
+    // Each section has its own viscous reduction factor; the combined S is
+    // limited by whichever is more restrictive.
+    const pAvgTurbo = Math.sqrt(pIn * pMid);
+    const pAvgHol = Math.sqrt(pMid * pOutSafe);
+    const pAvgK = Math.sqrt(pIn * pOutSafe);
+
+    const kH = kHolweckFm > 1 ? kAtPressure(kHolweckFm, hHolweck, pAvgK) : 1;
+    const kT = kTurbo > 1 ? kAtPressure(kTurbo, hTurbo, pAvgK) : 1;
     const K = kT * kH;
 
-    const sFrac = sFractionAtPressure(hAny, pAvg);
+    // Per-section viscous reduction:
+    const hasTurbo = (result.turbo?.stages.length ?? 0) > 0;
+    const hasHolweck = (result.holweck?.stages.length ?? 0) > 0;
+    const sFracTurbo = hasTurbo
+      ? sFractionAtPressure(hTurbo, pAvgTurbo)
+      : 1;
+    const sFracHol = hasHolweck
+      ? sFractionAtPressure(hHolweck, pAvgHol)
+      : 1;
+    // The overall pump's effective viscous factor is the minimum — the
+    // weaker of the two sections limits throughput at any given operating
+    // point.
+    const sFrac = Math.min(sFracTurbo, sFracHol);
+
     const stall = Math.max(0, 1 - pOutSafe / (K * pIn));
     const S_compression = result.sMaxLps * sFrac * stall;
     // Throughput-limited envelope (backing-pump capacity).
